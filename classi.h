@@ -31,10 +31,16 @@ class Robot6A{
   void setParameters(int ilink, double length, double twist, double distance, double theta);
   void getAngles(TMatrixT<double> matrix,double &angleX,double &angleY,double &angleZ);
   bool moveTo(double x, double y, double z, double stepping);
-
+  void setOrigin(double x, double y, double z){(*mMatriceTras)[0][3]=x;(*mMatriceTras)[1][3]=y;(*mMatriceTras)[2][3]=z;};
+  void rotate(int iaxis,double alpha);
+  void rotateX(double alpha) {rotate(0, alpha);}
+  void rotateY(double alpha) {rotate(1, alpha);}
+  void rotateZ(double alpha) {rotate(2, alpha);}
   void print();
 
  private:
+  int mFirstNodeInTopVolume;
+  TMatrixT<double> *mMatriceTras;
   Link mLink[6];
   float mLength[6];
   float mTwist[6];
@@ -44,11 +50,23 @@ class Robot6A{
   double mCurrentPos[3];
 
   TMatrixT<double> *mMatriceDelta[6];
- 
-  TGeoManager *mManager;
-  TGeoVolume *mTop;
-  TGeoMedium *mAir;
-  TGeoMedium *mIron;
 };
 
+class Geo{
+ public:
+  static TGeoManager* manager() {return mManager;}
+  static TGeoMedium* air() {return mAir;}
+  static TGeoMedium* iron() {return mIron;}
+  static void createTopVolume(float xsize, float ysize, float zsize) { mTop = mManager->MakeBox("top",Geo::air(),xsize,ysize,zsize); mManager->SetTopVolume(mTop); mTop->SetVisibility(0);}
+  static TGeoVolume* top();
+  static void closeGeo() {mManager->CloseGeometry();}
+ private:
+  static TGeoManager *mManager;
+  static TGeoMaterial *mVacuum;  
+  static TGeoMaterial *mFe; 
+  static TGeoVolume *mTop;
+  static TGeoMedium *mAir;
+  static TGeoMedium *mIron;
+
+};
 #endif

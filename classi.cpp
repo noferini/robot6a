@@ -4,6 +4,13 @@
 #include "TView.h"
 #include "TPad.h"
 
+TGeoManager *Geo::mManager = new TGeoManager("Robot","This is my robot");;
+TGeoMaterial *Geo::mVacuum = new TGeoMaterial("vacuum",0,0,0);  
+TGeoMaterial *Geo::mFe = new TGeoMaterial("Fe",55.845,26,7.87); 
+TGeoVolume *Geo::mTop = nullptr;
+TGeoMedium *Geo::mAir = new TGeoMedium("Vacuum",0,mVacuum);
+TGeoMedium *Geo::mIron = new TGeoMedium("Iron",1,mFe);
+
 //_________________________________
 Link::Link(){
   mMatrice = new TMatrixT<double>(4,4);
@@ -78,38 +85,64 @@ void Robot6A::setParameters(int ilink, double length, double twist, double dista
   mTheta[ilink]=theta;
 }
 //_________________________________
-Robot6A::Robot6A(){
-  mManager = new TGeoManager("Robot","This is my robot");
-
-  TGeoMaterial *vacuum=new TGeoMaterial("vacuum",0,0,0);  
-  TGeoMaterial *Fe=new TGeoMaterial("Fe",55.845,26,7.87); 
-  
-  mAir = new TGeoMedium("Vacuum",0,vacuum);
-  mIron = new TGeoMedium("Iron",1,Fe);
-  
+Robot6A::Robot6A(){  
+  mMatriceTras = new TMatrixT<double>(4,4);
+  (*mMatriceTras)[0][0] = 1;
+  (*mMatriceTras)[1][1] = 1;
+  (*mMatriceTras)[2][2] = 1;
+  (*mMatriceTras)[3][3] = 1;
   for(int i=0;i < 6; i++)
     mMatriceDelta[i] = new TMatrixT<double>(4,4);
 }
 //_________________________________
+TGeoVolume* Geo::top() {
+  if(!mTop){
+    mTop = mManager->MakeBox("top",Geo::air(),100,100,100);
+    mManager->SetTopVolume(mTop);
+    mTop->SetVisibility(0);
+  }
+ return mTop;
+}
+//_________________________________
 Robot6A::~Robot6A(){
+  if(mMatriceTras) delete mMatriceTras;
   for(int i=0;i < 6; i++)
     if(mMatriceDelta[i]) delete mMatriceDelta[i]; 
 }
 //_________________________________
+void Robot6A::rotate(int iaxis,double alpha){
+  TMatrixT<double> myrot(4,4);
+  myrot[0][0] = 1;
+  myrot[1][1] = 1;
+  myrot[2][2] = 1;
+  myrot[3][3] = 1;
+  alpha *= TMath::DegToRad();
+  if(iaxis == 0){
+    myrot[1][1] = cos(alpha);
+    myrot[1][2] = -sin(alpha);
+    myrot[2][1] = sin(alpha);
+    myrot[2][2] = cos(alpha);
+  }
+  else if(iaxis == 1){
+    myrot[2][2] = cos(alpha);
+    myrot[2][0] = -sin(alpha);
+    myrot[0][2] = sin(alpha);
+    myrot[0][0] = cos(alpha);
+  }
+  else if(iaxis == 2){
+    myrot[0][0] = cos(alpha);
+    myrot[0][1] = -sin(alpha);
+    myrot[1][0] = sin(alpha);
+    myrot[1][1] = cos(alpha);
+  }
+  *mMatriceTras *= myrot;
+}
+//_________________________________
 void Robot6A::setGeometry(){
-  mManager->Clear();
-
-  if(mTop) delete mTop;
-
-  mTop = mManager->MakeBox("top",mAir,100,100,100);   
-  mManager->SetTopVolume(mTop);     
-  mManager->SetTopVisible(0); 
-
+  if(! Geo::top()->GetNodes()) mFirstNodeInTopVolume = 0;
+  else mFirstNodeInTopVolume = Geo::top()->GetNodes()->GetEntries();
   TMatrixT<double> mymatrix(4,4);
-  mymatrix[0][0] = 1;
-  mymatrix[1][1] = 1;
-  mymatrix[2][2] = 1;
-  mymatrix[3][3] = 1;
+  mymatrix = *mMatriceTras;
 
   // links
   int colors[6] = {2,4,6,8,12,14};
@@ -147,7 +180,7 @@ void Robot6A::setGeometry(){
 
     mm *= tt;
     
-    Link[i] = mManager->MakeTube(Form("Link%d",i+1),mIron,0,0.2,mDistance[i]*0.5);
+    Link[i] = Geo::manager()->MakeTube(Form("Link%d",i+1),Geo::iron(),0,0.2,mDistance[i]*0.5);
     Link[i]->SetLineColor(colors[i]);
     Link[i]->SetFillColor(colors[i]);
 
@@ -160,7 +193,7 @@ void Robot6A::setGeometry(){
     TGeoTranslation tra(mm[0][3],mm[1][3],mm[2][3]);
     TGeoCombiTrans *trasf = new TGeoCombiTrans(tra, rot);
 
-    mTop->AddNodeOverlap(Link[i],1,trasf);
+    Geo::top()->AddNodeOverlap(Link[i],1,trasf);
 
     mm = mymatrix;
     mm *= *matTrunc;
@@ -189,16 +222,13 @@ void Robot6A::setGeometry(){
 
     mm.Print();
 
-    Link2[i] = mManager->MakeTube(Form("LinkB%d",i+1),mIron,0,0.4,mLength[i]*0.5);
+    Link2[i] = Geo::manager()->MakeTube(Form("LinkB%d",i+1),Geo::iron(),0,0.4,mLength[i]*0.5);
     Link2[i]->SetLineColor(colors[i]);
     Link2[i]->SetFillColor(colors[i]);
     trasf = new TGeoCombiTrans(tra2, rot2);    
-    mTop->AddNodeOverlap(Link2[i],1,trasf);
+    Geo::top()->AddNodeOverlap(Link2[i],1,trasf);
   }
   
-  mTop->SetVisibility(0);
-  mManager->CloseGeometry();
-
   changeGeometry();
 }
 //_________________________________
@@ -211,7 +241,7 @@ void Robot6A::changeGeometry(){
   mId[3][3] = 1;
     
   for(int i=0; i< 6; i++)
-    *(mMatriceDelta[i]) = mId;
+    *(mMatriceDelta[i]) = *mMatriceTras;
 
   for(int i=0; i< 6; i++){
     TMatrixT<double> mDelta(4,4);
@@ -238,10 +268,7 @@ void Robot6A::changeGeometry(){
   }
   
   TMatrixT<double> mymatrix(4,4);
-  mymatrix[0][0] = 1;
-  mymatrix[1][1] = 1;
-  mymatrix[2][2] = 1;
-  mymatrix[3][3] = 1;
+  mymatrix = *mMatriceTras;
 
   // links
   int colors[6] = {2,4,6,8,12,14};
@@ -277,7 +304,7 @@ void Robot6A::changeGeometry(){
 
     mm *= tt;
 
-    TGeoNode *nn = mTop->GetNode(i*2);
+    TGeoNode *nn = Geo::top()->GetNode(i*2 + mFirstNodeInTopVolume);
     TGeoMatrix *gm = nn->GetMatrix();
     gm->SetDx(mm[0][3]);
     gm->SetDy(mm[1][3]);
@@ -304,7 +331,7 @@ void Robot6A::changeGeometry(){
 
     mm *= tt;
 
-    nn = mTop->GetNode(i*2+1);
+    nn = Geo::top()->GetNode(i*2+1 + mFirstNodeInTopVolume);
     gm = nn->GetMatrix();
     gm->SetDx(mm[0][3]);
     gm->SetDy(mm[1][3]);
@@ -329,11 +356,11 @@ void Robot6A::changeGeometry(){
 }
 //_________________________________
 void Robot6A::draw(){
-  mTop->Draw("ogl");
+  Geo::top()->Draw("ogl");
 }
 //_________________________________
 void Robot6A::write(){
-  mManager->Export("geometry.root");
+  Geo::manager()->Export("geometry.root");
 }
 //_________________________________
 void Robot6A::getAngles(TMatrixT<double> matrix,double &angleX,double &angleY,double &angleZ){
