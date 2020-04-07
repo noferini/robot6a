@@ -85,14 +85,24 @@ void Robot6A::setParameters(int ilink, double length, double twist, double dista
   mTheta[ilink]=theta;
 }
 //_________________________________
-Robot6A::Robot6A(){  
+Robot6A::Robot6A(int n): mNaxis(n){  
   mMatriceTras = new TMatrixT<double>(4,4);
   (*mMatriceTras)[0][0] = 1;
   (*mMatriceTras)[1][1] = 1;
   (*mMatriceTras)[2][2] = 1;
   (*mMatriceTras)[3][3] = 1;
-  for(int i=0;i < 6; i++)
+
+  mLink = new Link[mNaxis];
+  mLength = new float[mNaxis];
+  mTwist  = new float[mNaxis];
+  mDistance = new float[mNaxis];
+  mTheta = new float[mNaxis];
+
+  mMatriceDelta = new TMatrixT<double>*[mNaxis];
+
+  for(int i=0;i < mNaxis; i++){
     mMatriceDelta[i] = new TMatrixT<double>(4,4);
+  }
 }
 //_________________________________
 TGeoVolume* Geo::top() {
@@ -106,8 +116,15 @@ TGeoVolume* Geo::top() {
 //_________________________________
 Robot6A::~Robot6A(){
   if(mMatriceTras) delete mMatriceTras;
-  for(int i=0;i < 6; i++)
+  for(int i=0;i < mNaxis; i++)
     if(mMatriceDelta[i]) delete mMatriceDelta[i]; 
+
+  delete[] mMatriceDelta;
+  delete[] mLink;
+  delete[] mLength;
+  delete[] mTwist;
+  delete[] mDistance;
+  delete[] mTheta;
 }
 //_________________________________
 void Robot6A::rotate(int iaxis,double alpha){
@@ -163,7 +180,7 @@ void Robot6A::setGeometry(){
   tt90[2][2]=0;
   tt90[3][3]=1;
 
-  for(int i=0; i < 6; i++){
+  for(int i=0; i < mNaxis; i++){
     TMatrixT<double> *mat = mLink[i].getMatrix();
     TMatrixT<double> *matTrunc = mLink[i].getMatrixTrunc();
 
@@ -240,10 +257,10 @@ void Robot6A::changeGeometry(){
   mId[2][2] = 1;
   mId[3][3] = 1;
     
-  for(int i=0; i< 6; i++)
+  for(int i=0; i< mNaxis; i++)
     *(mMatriceDelta[i]) = *mMatriceTras;
 
-  for(int i=0; i< 6; i++){
+  for(int i=0; i< mNaxis; i++){
     TMatrixT<double> mDelta(4,4);
 
     double stheta = sin(mTheta[i]*TMath::DegToRad());
@@ -259,7 +276,7 @@ void Robot6A::changeGeometry(){
     mDelta[1][2] =  stheta*stw;
     mDelta[1][3] =  ctheta*mLength[i];
 
-    for(int j=0; j< 6; j++){
+    for(int j=0; j< mNaxis; j++){
       if(i != j)
 	*(mMatriceDelta[j]) *= *(mLink[i].getMatrix());
       else
@@ -271,9 +288,13 @@ void Robot6A::changeGeometry(){
   mymatrix = *mMatriceTras;
 
   // links
-  int colors[6] = {2,4,6,8,12,14};
-  TGeoVolume *Link[6];
-  TGeoVolume *Link2[6];
+  int colors[mNaxis];
+  colors[0]=2;
+  for(int i=6; i < mNaxis;i++)
+    colors[i] = colors[i-1] + 2;
+
+  TGeoVolume *Link[mNaxis];
+  TGeoVolume *Link2[mNaxis];
 
   TMatrixT<double> tt(4,4);
   tt[0][0]=1;
@@ -289,7 +310,7 @@ void Robot6A::changeGeometry(){
   tt90[2][2]=0;
   tt90[3][3]=1;
 
-  for(int i=0; i < 6; i++){
+  for(int i=0; i < mNaxis; i++){
     TMatrixT<double> *mat = mLink[i].getMatrix();
     TMatrixT<double> *matTrunc = mLink[i].getMatrixTrunc();
 
@@ -381,7 +402,7 @@ void Robot6A::getAngles(TMatrixT<double> matrix,double &angleX,double &angleY,do
 }
 //_________________________________
 void Robot6A::print(){
-  for(int i=0; i < 6;i++)
+  for(int i=0; i < mNaxis;i++)
     printf("Link %i: a = %f, alpha = %f, d = %f, theta = %f\n",i,mLength[i],mTwist[i],mDistance[i],mTheta[i]);
 
 
@@ -393,7 +414,7 @@ void Robot6A::print(){
   global[2][2]=1;
   global[3][3]=1;
 
-  for(int i=0; i < 6; i++){
+  for(int i=0; i < mNaxis; i++){
     TMatrixT<double> *mat = mLink[i].getMatrix();
     global *= *mat;
     printf("Position (after link %d): X=%f, Y=%f, Z=%f\n",i,global[0][3],global[1][3],global[2][3]);
@@ -492,11 +513,11 @@ bool Robot6A::moveTo(double x, double y, double z, double stepping){
   printf("versor2 %f %f %f\n",v1[0],v1[1],v1[2]);
   printf("versor3 %f %f %f\n",v2[0],v2[1],v2[2]);
 
-  double sp1[6],sp2[6],sp3[6],sp1abs[6];
+  double sp1[mNaxis],sp2[mNaxis],sp3[mNaxis],sp1abs[mNaxis];
   double weight[3];
-  int order[6] = {0,1,2,3,4,5};
-  int order2[6] = {0,1,2,3,4,5};
-  int order3[6] = {0,1,2,3,4,5};
+  int order[20] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+  int order2[20] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+  int order3[20] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
   int select[3] = {0,1,2};
 
   TMatrixT<double> Jacobian(3,3);
@@ -507,7 +528,7 @@ bool Robot6A::moveTo(double x, double y, double z, double stepping){
   position[2][0] = z*stepping;
   
 
-  for(int i=0; i< 6; i++){
+  for(int i=0; i< mNaxis; i++){
     //mMatriceDelta[i]->Print();
     sp1[i] = (*mMatriceDelta[i])[0][3] * x + (*mMatriceDelta[i])[1][3] * y + (*mMatriceDelta[i])[2][3] * z;
     sp2[i] = (*mMatriceDelta[i])[0][3] * v1[0] + (*mMatriceDelta[i])[1][3] * v1[1] + (*mMatriceDelta[i])[2][3] * v1[2];
@@ -520,11 +541,11 @@ bool Robot6A::moveTo(double x, double y, double z, double stepping){
   }
 
   // first link to be moved -> the one with the movement closer to direction we want to follow
-  TMath::Sort(6,sp1abs,order);
+  TMath::Sort(mNaxis,sp1abs,order);
   select[0] = order[0];
 
   double orth1[6];
-  for(int i=0; i< 6; i++){
+  for(int i=0; i< mNaxis; i++){
     double norm = sqrt((*mMatriceDelta[i])[0][3]*(*mMatriceDelta[i])[0][3] + (*mMatriceDelta[i])[1][3]*(*mMatriceDelta[i])[1][3] + (*mMatriceDelta[i])[2][3]*(*mMatriceDelta[i])[2][3]);
     orth1[i] = abs((*mMatriceDelta[select[0]])[0][3]*(*mMatriceDelta[i])[0][3] + (*mMatriceDelta[select[0]])[1][3]*(*mMatriceDelta[i])[1][3] + (*mMatriceDelta[select[0]])[2][3]*(*mMatriceDelta[i])[2][3]);
     orth1[i] /= norm;
@@ -532,7 +553,7 @@ bool Robot6A::moveTo(double x, double y, double z, double stepping){
   }
 
   // take as second link the one most orthogonal to the first one
-  TMath::Sort(6,orth1,order2);
+  TMath::Sort(mNaxis,orth1,order2);
   select[1] = order2[5];
 
   // take the direction orthogonal to both (vectorial product)
@@ -541,9 +562,9 @@ bool Robot6A::moveTo(double x, double y, double z, double stepping){
   dir3[1] = (*mMatriceDelta[select[0]])[2][3]*(*mMatriceDelta[select[1]])[0][3] - (*mMatriceDelta[select[0]])[0][3]*(*mMatriceDelta[select[1]])[2][3];
   dir3[2] = (*mMatriceDelta[select[0]])[0][3]*(*mMatriceDelta[select[1]])[1][3] - (*mMatriceDelta[select[0]])[1][3]*(*mMatriceDelta[select[1]])[0][3];
 
-  double orth2[6];
+  double orth2[mNaxis];
 
-  for(int i=0; i< 6; i++){
+  for(int i=0; i< mNaxis; i++){
     double norm = sqrt((*mMatriceDelta[i])[0][3]*(*mMatriceDelta[i])[0][3] + (*mMatriceDelta[i])[1][3]*(*mMatriceDelta[i])[1][3] + (*mMatriceDelta[i])[2][3]*(*mMatriceDelta[i])[2][3]);
     orth2[i] = abs(dir3[0]*(*mMatriceDelta[i])[0][3] + dir3[1]*(*mMatriceDelta[i])[1][3] + dir3[2]*(*mMatriceDelta[i])[2][3]);
     orth2[i] /= norm;
@@ -551,7 +572,7 @@ bool Robot6A::moveTo(double x, double y, double z, double stepping){
   }
 
   // take as third link the one most orthogonal to both
-  TMath::Sort(6,orth2,order3);
+  TMath::Sort(mNaxis,orth2,order3);
   select[2] = order3[0];
 
   printf("dir3: %f %f %f\n",dir3[0],dir3[1],dir3[2]);

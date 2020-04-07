@@ -22,7 +22,7 @@ class Link{
 
 class Robot6A{
  public:
-  Robot6A();
+  Robot6A(int n=6);
   ~Robot6A();
   void setGeometry();
   void changeGeometry();
@@ -38,18 +38,21 @@ class Robot6A{
   void rotateZ(double alpha) {rotate(2, alpha);}
   void print();
 
+  int getNaxis() const {return mNaxis;}
+ 
  private:
+  const int mNaxis = 6;
   int mFirstNodeInTopVolume;
   TMatrixT<double> *mMatriceTras;
-  Link mLink[6];
-  float mLength[6];
-  float mTwist[6];
-  float mDistance[6];
-  float mTheta[6];
+  Link *mLink;
+  float *mLength;
+  float *mTwist;
+  float *mDistance;
+  float *mTheta;
 
   double mCurrentPos[3];
 
-  TMatrixT<double> *mMatriceDelta[6];
+  TMatrixT<double> **mMatriceDelta;
 };
 
 class Geo{
