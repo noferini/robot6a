@@ -500,7 +500,6 @@ bool Robot6A::moveTo(double x, double y, double z, double stepping){
     }
   }
 
-
   double norm = 1./sqrt(v1[0]*v1[0] + v1[1]*v1[1] + v1[2]*v1[2]);
   v1[0] *= norm; 
   v1[1] *= norm; 
@@ -513,20 +512,12 @@ bool Robot6A::moveTo(double x, double y, double z, double stepping){
   printf("versor2 %f %f %f\n",v1[0],v1[1],v1[2]);
   printf("versor3 %f %f %f\n",v2[0],v2[1],v2[2]);
 
+  bool exclusion[mNaxis];
+  for(int i=0; i< mNaxis;i++) exclusion[i] = false;
+
   double sp1[mNaxis],sp2[mNaxis],sp3[mNaxis],sp1abs[mNaxis];
   double weight[3];
   int order[20] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
-  int order2[20] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
-  int order3[20] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
-  int select[3] = {0,1,2};
-
-  TMatrixT<double> Jacobian(3,3);
-  TMatrixT<double> position(3,1);
-  TMatrixT<double> deltatheta(3,1);
-  position[0][0] = x*stepping;
-  position[1][0] = y*stepping;
-  position[2][0] = z*stepping;
-  
 
   for(int i=0; i< mNaxis; i++){
     //mMatriceDelta[i]->Print();
@@ -540,81 +531,37 @@ bool Robot6A::moveTo(double x, double y, double z, double stepping){
     printf("%d) proj %f %f %f -> %f\n",i,sp1[i],sp2[i],sp3[i],sp1abs[i]);
   }
 
-  // first link to be moved -> the one with the movement closer to direction we want to follow
-  TMath::Sort(mNaxis,sp1abs,order);
-  select[0] = order[0];
+  bool isgood = false;
 
-  double orth1[6];
-  for(int i=0; i< mNaxis; i++){
-    double norm = sqrt((*mMatriceDelta[i])[0][3]*(*mMatriceDelta[i])[0][3] + (*mMatriceDelta[i])[1][3]*(*mMatriceDelta[i])[1][3] + (*mMatriceDelta[i])[2][3]*(*mMatriceDelta[i])[2][3]);
-    orth1[i] = abs((*mMatriceDelta[select[0]])[0][3]*(*mMatriceDelta[i])[0][3] + (*mMatriceDelta[select[0]])[1][3]*(*mMatriceDelta[i])[1][3] + (*mMatriceDelta[select[0]])[2][3]*(*mMatriceDelta[i])[2][3]);
-    orth1[i] /= norm;
-    printf("orth1: %d -> %f\n",i,orth1[i]);
+  double dtheta[3],maxdtheta;
+  double normincr;
+  while(! isgood){
+    int n = getAngleToBeMoved(sp1abs,order,exclusion);
+
+    getWeight(sp1,sp2,sp3,order,weight);
+
+    normincr = stepping/(weight[0]*sp1[order[0]] + weight[1]*sp1[order[1]] + weight[2]*sp1[order[2]]);
+
+    maxdtheta=0;
+    for(int i=0; i < 3; i++){
+      dtheta[i] = normincr * weight[i] * TMath::RadToDeg();
+      if(abs(dtheta[i]) > maxdtheta) maxdtheta = abs(dtheta[i]);
+    }
+
+    if(maxdtheta < 5 || n < 4) isgood = 1;
+    else{
+      for(int i=2; i >= 0; i--){
+	if(abs(dtheta[i]) > 5){
+	  exclusion[order[i]] = true;
+	  i = -1;
+	}
+      }
+    }
   }
 
-  // take as second link the one most orthogonal to the first one
-  TMath::Sort(mNaxis,orth1,order2);
-  select[1] = order2[5];
-
-  // take the direction orthogonal to both (vectorial product)
-  double dir3[3];
-  dir3[0] = (*mMatriceDelta[select[0]])[1][3]*(*mMatriceDelta[select[1]])[2][3] - (*mMatriceDelta[select[0]])[2][3]*(*mMatriceDelta[select[1]])[1][3];
-  dir3[1] = (*mMatriceDelta[select[0]])[2][3]*(*mMatriceDelta[select[1]])[0][3] - (*mMatriceDelta[select[0]])[0][3]*(*mMatriceDelta[select[1]])[2][3];
-  dir3[2] = (*mMatriceDelta[select[0]])[0][3]*(*mMatriceDelta[select[1]])[1][3] - (*mMatriceDelta[select[0]])[1][3]*(*mMatriceDelta[select[1]])[0][3];
-
-  double orth2[mNaxis];
-
-  for(int i=0; i< mNaxis; i++){
-    double norm = sqrt((*mMatriceDelta[i])[0][3]*(*mMatriceDelta[i])[0][3] + (*mMatriceDelta[i])[1][3]*(*mMatriceDelta[i])[1][3] + (*mMatriceDelta[i])[2][3]*(*mMatriceDelta[i])[2][3]);
-    orth2[i] = abs(dir3[0]*(*mMatriceDelta[i])[0][3] + dir3[1]*(*mMatriceDelta[i])[1][3] + dir3[2]*(*mMatriceDelta[i])[2][3]);
-    orth2[i] /= norm;
-    printf("orth2: %d -> %f\n",i,orth2[i]);
-  }
-
-  // take as third link the one most orthogonal to both
-  TMath::Sort(mNaxis,orth2,order3);
-  select[2] = order3[0];
-
-  printf("dir3: %f %f %f\n",dir3[0],dir3[1],dir3[2]);
-  printf("order: %d %d %d\n",order[0],order[1],order[2]);
-  printf("select: %d %d %d\n",select[0],select[1],select[2]);
-
-  order[0] = select[0];
-  order[1] = select[1];
-  order[2] = select[2];
-
-  for(int i=0; i< 3;i++){
-    Jacobian[0][i] = sp1[order[i]];
-    Jacobian[1][i] = sp2[order[i]];
-    Jacobian[2][i] = sp3[order[i]];
-  }
-
-  printf("Determinant = %f\n",Jacobian.Determinant());
-  Jacobian.Invert();
-  deltatheta = Jacobian * position;
-
-  if(sp1[order[0]] > 0) weight[0] = 1;
-  else weight[0] = -1;
-
-  // use the last 2 to avoid orthogonal movements
-  // order[1] = order[4];
-  // order[2] = order[5];
-
-  weight[1] = (sp3[order[0]] * sp2[order[2]] / sp3[order[2]] - sp2[order[0]]) / (sp2[order[1]] - sp3[order[1]] * sp2[order[2]] / sp3[order[2]]) * weight[0];
-  weight[2] = (sp3[order[0]] * sp2[order[1]] / sp3[order[1]] - sp2[order[0]]) / (sp2[order[2]] - sp3[order[2]] * sp2[order[1]] / sp3[order[1]]) * weight[0];
-
-  double normincr = stepping/(weight[0]*sp1[order[0]] + weight[1]*sp1[order[1]] + weight[2]*sp1[order[2]]);
-  //normincr = stepping/weight[0]/sp1[order[0]];
-
-  double dtheta[3],maxdtheta=0;
-  for(int i=0; i < 3; i++){
-    dtheta[i] = normincr * weight[i] * TMath::RadToDeg();
-    if(abs(dtheta[i]) > maxdtheta) maxdtheta = abs(dtheta[i]);
-  }
-
-  if(maxdtheta > 10){
+  if(maxdtheta > 1){
     for(int i=0; i < 3; i++)
-      dtheta[i] *= 10./maxdtheta;
+      dtheta[i] *= 1./maxdtheta;
   }
 
 
@@ -636,4 +583,78 @@ bool Robot6A::moveTo(double x, double y, double z, double stepping){
 
   changeGeometry();
   return 0;
+}
+//_________________________________
+int Robot6A::getAngleToBeMoved(double *sp1absOr, int *order, bool *exclusion){
+  double sp1abs[mNaxis];
+  int order1[20] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+  int order2[20] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+  int order3[20] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
+  int select[3] = {0,1,2};
+
+  int neff = 0;
+  for(int i=0; i < mNaxis; i++){
+    order[neff] = i;
+    sp1abs[neff] = sp1absOr[i];
+    if(! exclusion[i]) neff++;
+  }
+
+  // first link to be moved -> the one with the movement closer to direction we want to follow
+  TMath::Sort(neff,sp1abs,order1);
+  select[0] = order[order1[0]];
+
+  double orth1[mNaxis];
+  for(int j=0; j< neff; j++){
+    int i = order[j];
+    double norm = sqrt((*mMatriceDelta[i])[0][3]*(*mMatriceDelta[i])[0][3] + (*mMatriceDelta[i])[1][3]*(*mMatriceDelta[i])[1][3] + (*mMatriceDelta[i])[2][3]*(*mMatriceDelta[i])[2][3]);
+    orth1[j] = abs((*mMatriceDelta[select[0]])[0][3]*(*mMatriceDelta[i])[0][3] + (*mMatriceDelta[select[0]])[1][3]*(*mMatriceDelta[i])[1][3] + (*mMatriceDelta[select[0]])[2][3]*(*mMatriceDelta[i])[2][3]);
+    orth1[j] /= norm;
+    printf("orth1: %d -> %f\n",i,orth1[j]);
+  }
+
+  // take as second link the one most orthogonal to the first one
+  TMath::Sort(neff,orth1,order2);
+  select[1] = order[order2[neff-1]];
+  for(int j=0; j< neff; j++){
+    printf("order2(%d) = %d\n",j,order2[j]);
+  }
+
+
+  // take the direction orthogonal to both (vectorial product)
+  double dir3[3];
+  dir3[0] = (*mMatriceDelta[select[0]])[1][3]*(*mMatriceDelta[select[1]])[2][3] - (*mMatriceDelta[select[0]])[2][3]*(*mMatriceDelta[select[1]])[1][3];
+  dir3[1] = (*mMatriceDelta[select[0]])[2][3]*(*mMatriceDelta[select[1]])[0][3] - (*mMatriceDelta[select[0]])[0][3]*(*mMatriceDelta[select[1]])[2][3];
+  dir3[2] = (*mMatriceDelta[select[0]])[0][3]*(*mMatriceDelta[select[1]])[1][3] - (*mMatriceDelta[select[0]])[1][3]*(*mMatriceDelta[select[1]])[0][3];
+
+  double orth2[mNaxis];
+
+  for(int j=0; j< neff; j++){
+    int i = order[j];
+    double norm = sqrt((*mMatriceDelta[i])[0][3]*(*mMatriceDelta[i])[0][3] + (*mMatriceDelta[i])[1][3]*(*mMatriceDelta[i])[1][3] + (*mMatriceDelta[i])[2][3]*(*mMatriceDelta[i])[2][3]);
+    orth2[j] = abs(dir3[0]*(*mMatriceDelta[i])[0][3] + dir3[1]*(*mMatriceDelta[i])[1][3] + dir3[2]*(*mMatriceDelta[i])[2][3]);
+    orth2[j] /= norm;
+    printf("orth2: %d -> %f\n",i,orth2[j]);
+  }
+
+  // take as third link the one most orthogonal to both
+  TMath::Sort(neff,orth2,order3);
+  select[2] = order[order3[0]];
+
+  printf("dir3: %f %f %f\n",dir3[0],dir3[1],dir3[2]);
+  printf("order: %d %d %d\n",order[0],order[1],order[2]);
+  printf("select: %d %d %d\n",select[0],select[1],select[2]);
+
+  order[0] = select[0];
+  order[1] = select[1];
+  order[2] = select[2];
+
+  return neff;
+}
+//_________________________________
+void Robot6A::getWeight(double *sp1,double *sp2,double *sp3,int *order, double weight[3]){
+  if(sp1[order[0]] > 0) weight[0] = 1;
+  else weight[0] = -1;
+
+  weight[1] = (sp3[order[0]] * sp2[order[2]] / sp3[order[2]] - sp2[order[0]]) / (sp2[order[1]] - sp3[order[1]] * sp2[order[2]] / sp3[order[2]]) * weight[0];
+  weight[2] = (sp3[order[0]] * sp2[order[1]] / sp3[order[1]] - sp2[order[0]]) / (sp2[order[2]] - sp3[order[2]] * sp2[order[1]] / sp3[order[1]]) * weight[0];
 }
