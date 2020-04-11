@@ -26,6 +26,8 @@ class Robot6A{
   ~Robot6A();
   void setGeometry();
   void changeGeometry();
+  void setDeltaMatrix();
+  void testIteration(double x, double y, double z);
   void draw();
   void write();
   void setParameters(int ilink, double length, double twist, double distance, double theta);
@@ -33,6 +35,7 @@ class Robot6A{
   bool moveTo(double x, double y, double z, double stepping);
   int getAngleToBeMoved(double *sp1absOr, int *order, bool *exclusion);
   void getWeight(double *sp1,double *sp2,double *sp3,int *order, double weight[3]);
+  void getBestWeight(double *sp1,double *sp2,double *sp3, double *weight);
   void setOrigin(double x, double y, double z){(*mMatriceTras)[0][3]=x;(*mMatriceTras)[1][3]=y;(*mMatriceTras)[2][3]=z;};
   void rotate(int iaxis,double alpha);
   void rotateX(double alpha) {rotate(0, alpha);}
@@ -41,6 +44,8 @@ class Robot6A{
   void print();
 
   int getNaxis() const {return mNaxis;}
+
+  void checkDerivative(double *dtheta);
  
  private:
   const int mNaxis = 6;

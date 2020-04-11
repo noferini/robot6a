@@ -249,13 +249,8 @@ void Robot6A::setGeometry(){
   changeGeometry();
 }
 //_________________________________
-void Robot6A::changeGeometry(){
+void Robot6A::setDeltaMatrix(){
   // define Delta Matrix
-  TMatrixT<double> mId(4,4);
-  mId[0][0] = 1;
-  mId[1][1] = 1;
-  mId[2][2] = 1;
-  mId[3][3] = 1;
     
   for(int i=0; i< mNaxis; i++)
     *(mMatriceDelta[i]) = *mMatriceTras;
@@ -283,6 +278,17 @@ void Robot6A::changeGeometry(){
 	*(mMatriceDelta[j]) *= mDelta;
     }
   }
+}
+//_________________________________
+void Robot6A::changeGeometry(){
+  // define Delta Matrix
+  TMatrixT<double> mId(4,4);
+  mId[0][0] = 1;
+  mId[1][1] = 1;
+  mId[2][2] = 1;
+  mId[3][3] = 1;
+
+  setDeltaMatrix();
   
   TMatrixT<double> mymatrix(4,4);
   mymatrix = *mMatriceTras;
@@ -421,9 +427,55 @@ void Robot6A::print(){
   }
 }
 //_________________________________
-bool Robot6A::moveTo(double x, double y, double z, double stepping){
+void Robot6A::testIteration(double x, double y, double z){
+  double toPos[3] = {x,y,z};
+  double fromPos[3] = {mCurrentPos[0],mCurrentPos[1],mCurrentPos[2]};
 
-  printf("To %f %f %f - From %f %f %f (step = %f)\n",x,y,z,mCurrentPos[0],mCurrentPos[1],mCurrentPos[2],stepping);
+  static int previousLink = -1;
+
+  x -= mCurrentPos[0];
+  y -= mCurrentPos[1];
+  z -= mCurrentPos[2];
+  double stepping = sqrt(x*x + y*y + z*z);
+  x /= stepping;
+  y /= stepping;
+  z /= stepping;
+
+  double sp1[mNaxis],comp1[mNaxis],sp1abs[mNaxis], norm;
+  for(int i=0; i< mNaxis; i++){
+    //mMatriceDelta[i]->Print();
+    norm = sqrt((*mMatriceDelta[i])[0][3]*(*mMatriceDelta[i])[0][3] + (*mMatriceDelta[i])[1][3]*(*mMatriceDelta[i])[1][3] + (*mMatriceDelta[i])[2][3]*(*mMatriceDelta[i])[2][3]);
+    comp1[i] = (*mMatriceDelta[i])[0][3] * x + (*mMatriceDelta[i])[1][3] * y + (*mMatriceDelta[i])[2][3] * z;
+    sp1[i] = comp1[i]/norm;
+    sp1abs[i] = abs(sp1[i]);
+    comp1[i] = abs(comp1[i]);
+    printf("%d) mDelta= %f %f %f -- dir = %f %f %f -> comp = %f, sp = %f\n",i,(*mMatriceDelta[i])[0][3],(*mMatriceDelta[i])[1][3],(*mMatriceDelta[i])[2][3],x,y,z,comp1[i],sp1[i]);
+    printf("ord=%d) sp = %f\n",i,sp1[i]);
+  }
+  
+  int order[mNaxis];
+  int order2[mNaxis];
+  TMath::Sort(mNaxis,sp1abs,order);
+  TMath::Sort(mNaxis,comp1,order2);
+
+  // if(order[0] == previousLink) order[0] = order[1];
+  previousLink = order[0];
+
+  double dtheta = 1./sp1[order[0]]/norm*stepping*TMath::RadToDeg();
+  
+  printf("testIteration: link=%d - scalar product = %f - deltatheta = %f\n",order[0],sp1[order[0]],dtheta);
+
+  if(dtheta > 0.1) dtheta = 0.1;
+
+  setParameters(order[0], mLength[order[0]], mTwist[order[0]], mDistance[order[0]],  mTheta[order[0]] + dtheta); 
+  changeGeometry();
+  printf("To %f %f %f - From %f %f %f (step = %f)\n",toPos[0],toPos[1],toPos[2],fromPos[0],fromPos[1],fromPos[2],stepping);
+  printf("Now at: %f %f %f\n",mCurrentPos[0],mCurrentPos[1],mCurrentPos[2]);
+}
+//_________________________________
+bool Robot6A::moveTo(double x, double y, double z, double stepping){
+  double toPos[3] = {x,y,z};
+  double fromPos[3] = {mCurrentPos[0],mCurrentPos[1],mCurrentPos[2]};
   x -= mCurrentPos[0];
   y -= mCurrentPos[1];
   z -= mCurrentPos[2];
@@ -516,7 +568,7 @@ bool Robot6A::moveTo(double x, double y, double z, double stepping){
   for(int i=0; i< mNaxis;i++) exclusion[i] = false;
 
   double sp1[mNaxis],sp2[mNaxis],sp3[mNaxis],sp1abs[mNaxis];
-  double weight[3];
+  double weight[100];
   int order[20] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19};
 
   for(int i=0; i< mNaxis; i++){
@@ -533,55 +585,88 @@ bool Robot6A::moveTo(double x, double y, double z, double stepping){
 
   bool isgood = false;
 
-  double dtheta[3],maxdtheta;
+  double dtheta[100],maxdtheta;
   double normincr;
-  while(! isgood){
-    int n = getAngleToBeMoved(sp1abs,order,exclusion);
 
-    getWeight(sp1,sp2,sp3,order,weight);
+  int mode = 1;
 
-    normincr = stepping/(weight[0]*sp1[order[0]] + weight[1]*sp1[order[1]] + weight[2]*sp1[order[2]]);
+  if(mode == 0){
+    while(! isgood){
+      int n = getAngleToBeMoved(sp1abs,order,exclusion);
+      
+      getWeight(sp1,sp2,sp3,order,weight);
+      
+      normincr = stepping/(weight[0]*sp1[order[0]] + weight[1]*sp1[order[1]] + weight[2]*sp1[order[2]]);
+      
+      maxdtheta=0;
+      for(int i=0; i < 3; i++){
+	printf("%d) order = %d, delta-theta = %f \n",i,order[i],dtheta[i]);
+	dtheta[i] = normincr * weight[i] * TMath::RadToDeg();
+	if(abs(dtheta[i]) > maxdtheta) maxdtheta = abs(dtheta[i]);
+      }
 
-    maxdtheta=0;
-    for(int i=0; i < 3; i++){
-      dtheta[i] = normincr * weight[i] * TMath::RadToDeg();
-      if(abs(dtheta[i]) > maxdtheta) maxdtheta = abs(dtheta[i]);
-    }
-
-    if(maxdtheta < 5 || n < 4) isgood = 1;
-    else{
-      for(int i=2; i >= 0; i--){
-	if(abs(dtheta[i]) > 5){
-	  exclusion[order[i]] = true;
-	  i = -1;
+      if(maxdtheta < 1 || n < 4) isgood = 1;
+      else{
+	for(int i=2; i >= 0; i--){
+	  if(abs(dtheta[i]) > 1){
+	    exclusion[order[i]] = true;
+	    i = -1;
+	  }
 	}
       }
     }
   }
+  else if(mode == 1){
+   getBestWeight(sp1,sp2,sp3,weight);
+   
+   maxdtheta = 0;
+   for(int i=0; i < mNaxis; i++){
+     dtheta[i] = stepping * weight[i] * TMath::RadToDeg();
+     if(abs(dtheta[i]) > maxdtheta) maxdtheta = abs(dtheta[i]);
+   }
+  }
 
   if(maxdtheta > 1){
-    for(int i=0; i < 3; i++)
-      dtheta[i] *= 1./maxdtheta;
+    printf("MAXDTHETA = %f\n",maxdtheta);
+    for(int i=0; i < mNaxis; i++){
+     dtheta[i] *= 1/maxdtheta;
+    }
   }
 
 
   printf("weights: %f %f %f (norm = %f)\n",weight[0],weight[1],weight[2],normincr);
 
-  double check[3] = {0,0,0};
-
-  for(int i=0; i < 3; i++){
-    mTheta[order[i]] += dtheta[i];
-    check[0] += dtheta[i] * sp1[order[i]];
-    check[1] += dtheta[i] * sp2[order[i]];
-    check[2] += dtheta[i] * sp3[order[i]];
-    setParameters(order[i], mLength[order[i]], mTwist[order[i]], mDistance[order[i]],  mTheta[order[i]]);
-
-    printf("%d) order = %d, delta-theta = %f \n",i,order[i],dtheta[i]);
+  if (mode == 0){
+    for(int i=0; i < 3; i++){
+      mTheta[order[i]] += dtheta[i];
+      setParameters(order[i], mLength[order[i]], mTwist[order[i]], mDistance[order[i]],  mTheta[order[i]]); 
+    }
+  }
+  else if(mode == 1){
+    for(int i=0; i < mNaxis; i++){
+      //mTheta[i] += dtheta[i];
+      printf("theta final: %d -> %f (increment %f)\n",i,mTheta[i], dtheta[i]);
+    
+      //setParameters(i, mLength[i], mTwist[i], mDistance[i],  mTheta[i]); 
+    }
   }
 
-  printf("check: %f %f %f\n",check[0],check[1],check[2]);
+  double realmov[3] = {0., 0., 0.};
+  if(mode == 1){
+    for(int i=0; i < mNaxis;i++){
+      realmov[0] += (*mMatriceDelta[i])[0][3]*dtheta[i]*TMath::DegToRad();
+      realmov[1] += (*mMatriceDelta[i])[1][3]*dtheta[i]*TMath::DegToRad();
+      realmov[2] += (*mMatriceDelta[i])[2][3]*dtheta[i]*TMath::DegToRad();
+    }
+  }
 
-  changeGeometry();
+  //  changeGeometry();
+  checkDerivative(dtheta);
+  printf("To %f %f %f - From %f %f %f (step = %f)\n",toPos[0],toPos[2],toPos[2],fromPos[0],fromPos[1],fromPos[2],stepping);
+  printf("Now at: %f %f %f\n",mCurrentPos[0],mCurrentPos[1],mCurrentPos[2]);
+  printf("calcolated moved of: %e %e %e\n",realmov[0],realmov[1],realmov[2]);
+  printf("moved of: %e %e %e\n",mCurrentPos[0]-fromPos[0],mCurrentPos[1]-fromPos[1],mCurrentPos[2]-fromPos[2]);
+  printf("expected: %e %e %e\n",x*stepping,y*stepping,z*stepping);
   return 0;
 }
 //_________________________________
@@ -657,4 +742,116 @@ void Robot6A::getWeight(double *sp1,double *sp2,double *sp3,int *order, double w
 
   weight[1] = (sp3[order[0]] * sp2[order[2]] / sp3[order[2]] - sp2[order[0]]) / (sp2[order[1]] - sp3[order[1]] * sp2[order[2]] / sp3[order[2]]) * weight[0];
   weight[2] = (sp3[order[0]] * sp2[order[1]] / sp3[order[1]] - sp2[order[0]]) / (sp2[order[2]] - sp3[order[2]] * sp2[order[1]] / sp3[order[1]]) * weight[0];
+}
+//_________________________________
+void Robot6A::getBestWeight(double *sp1,double *sp2,double *sp3, double *weight){
+  int nv = mNaxis;
+
+  double vvx[100],vvy[100],vvz[100],vvxabs[100],vvyabs[100],vvzabs[100];
+  double ww1[100],ww2[100],stepEff=0;
+  double *ww3 = weight;
+  int order[100];
+  float sign[100];
+  double vvxOr[100],vvyOr[100],vvzOr[100];
+
+  for(int i=0; i < nv; i++){
+    vvxOr[i] = sp1[i];
+    vvyOr[i] = sp2[i];
+    vvzOr[i] = sp3[i];
+    vvx[i] = vvxOr[i];
+    vvy[i] = vvyOr[i];
+    vvz[i] = vvzOr[i];
+    vvxabs[i] = abs(vvxOr[i]);
+    vvyabs[i] = abs(vvyOr[i]);
+    vvzabs[i] = abs(vvzOr[i]);
+  }
+
+  // step 1
+  TMath::Sort(nv,vvzabs,order);
+  int izsub = order[0];
+
+  for(int i=0; i < nv; i++){
+    if(i!= izsub) ww1[i] = vvz[i]/vvz[izsub];
+    else ww1[i] = 0;
+    vvx[i] -= ww1[i] * vvx[izsub];
+    vvy[i] -= ww1[i] * vvy[izsub];
+    vvz[i] -= ww1[i] * vvz[izsub];
+    vvyabs[i] = abs(vvy[i]);
+  }
+  vvx[izsub] = 0;
+  vvy[izsub] = 0;
+  vvyabs[izsub] = 0;
+  vvz[izsub] = 0;
+
+  // step 2
+  TMath::Sort(nv,vvyabs,order);
+  int iysub = order[0];
+
+  for(int i=0; i < nv; i++){
+    if(i!= iysub) ww2[i] = vvy[i]/vvy[iysub];
+    else ww2[i] = 0;
+    vvx[i] -= ww2[i] * vvx[iysub];
+    vvy[i] -= ww2[i] * vvy[iysub];
+    vvz[i] -= ww2[i] * vvz[iysub];
+    ww3[i] = vvx[i] * vvx[i];
+
+    if(vvx[i] > 0) sign[i] = 1;
+    else sign[i] = -1;
+
+    if(i!= iysub) stepEff += ww3[i] * vvx[i] * sign[i];
+    printf("%f %f %f\n",vvx[i],vvy[i],vvz[i]);
+  }
+  vvx[iysub] = 0;
+  vvxabs[izsub] = 0;
+  vvy[iysub] = 0;
+  vvz[iysub] = 0;
+  ww3[iysub] = 0;
+  
+  // step 3
+  for(int i=0; i < nv; i++){
+    if(i != izsub && i != iysub){
+      ww3[i] /= stepEff;
+      ww3[i] *= sign[i];
+      ww3[izsub] += ww3[i]*(ww1[iysub]*ww2[i] - ww1[i]);
+      ww3[iysub] += -ww3[i] * ww2[i];
+    }
+  }
+
+  float check[3] = {0,0,0};
+  for(int i=0; i < nv; i++){
+    check[0] += vvxOr[i]*ww3[i];
+    check[1] += vvyOr[i]*ww3[i];
+    check[2] += vvzOr[i]*ww3[i];
+  }
+
+  printf("check: %f %f %f\n",check[0],check[1],check[2]);
+ 
+}
+//_________________________________
+void Robot6A::checkDerivative(double *dtheta){
+  double x0 = mCurrentPos[0];
+  double y0 = mCurrentPos[1];
+  double z0 = mCurrentPos[2];
+
+  double pos[100][3];
+  double der[100][3];
+
+  for(int i=0; i <  mNaxis; i++){
+    der[i][0] = (*mMatriceDelta[i])[0][3]*dtheta[i]*TMath::DegToRad();
+    der[i][1] = (*mMatriceDelta[i])[1][3]*dtheta[i]*TMath::DegToRad();
+    der[i][2] = (*mMatriceDelta[i])[2][3]*dtheta[i]*TMath::DegToRad();
+  }
+
+  for(int i=0; i <  mNaxis; i++){
+    x0 = mCurrentPos[0];
+    y0 = mCurrentPos[1];
+    z0 = mCurrentPos[2];
+    setParameters(i, mLength[i], mTwist[i], mDistance[i],  mTheta[i] + dtheta[i]);
+    changeGeometry();
+    pos[i][0] = (mCurrentPos[0] - x0);
+    pos[i][1] = (mCurrentPos[1] - y0);
+    pos[i][2] = (mCurrentPos[2] - z0);
+    printf("%d) %f %f %f  -  %f %f %f\n",i,pos[i][0],pos[i][1],pos[i][2],der[i][0],der[i][1],der[i][2]);
+  }
+
 }
