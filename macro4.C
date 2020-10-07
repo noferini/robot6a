@@ -31,6 +31,10 @@ void AnimateCamera(){
   
 }
 
+void moveto(float x, float y, float z, float step=0.01){
+   while(!rob.moveTo(x,y,z,step)) ((TGLViewer *)gPad->GetViewer3D())->UpdateScene();
+}
+
 void macro4(){
 
 //  Robot6A rob;
